@@ -240,6 +240,9 @@ namespace RdpQuickSwitch
             StartPosition = FormStartPosition.Manual;
             ShowInTaskbar = false;
             TopMost = true;
+            // 浮窗尺寸完全由 UpdateSize 按 DPI 自行计算，必须禁掉 WinForms 的
+            // 自动缩放，否则句柄创建时会被按字体/DPI 基线放大一次，和 Region 错位
+            AutoScaleMode = AutoScaleMode.None;
             DoubleBuffered = true;
             Opacity = 0.92;
             BackColor = Color.FromArgb(28, 30, 35);
@@ -257,6 +260,10 @@ namespace RdpQuickSwitch
             _collapseTimer.Interval = 350;
             _collapseTimer.Tick += CollapseTimerTick;
 
+            // 初始必须无条件按收起态定好尺寸：
+            // 若当前没有任何远程桌面窗口，RefreshWindows 检测不到变化会跳过 UpdateSize，
+            // 表单就会保持 WinForms 默认的 300x300，浮窗变成一个大灰块。
+            UpdateSize();
             RefreshWindows();
             _pollTimer.Start();
         }
@@ -287,7 +294,14 @@ namespace RdpQuickSwitch
         {
             base.OnLoad(e);
             Text = "远程桌面快切";
+            UpdateSize(); // 句柄创建后按最终状态再定一次尺寸+Region，防止创建期的缩放干扰
             ReassertTopMost();
+        }
+
+        protected override void OnResize(EventArgs e)
+        {
+            base.OnResize(e);
+            ApplyRegion(); // 尺寸无论被谁改动，圆角区域始终跟随
         }
 
         // ---------------- 尺寸与位置 ----------------
