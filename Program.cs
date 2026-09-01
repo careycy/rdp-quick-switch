@@ -77,6 +77,7 @@ namespace RdpQuickSwitch
         public const int WS_EX_TOOLWINDOW = 0x80;
         public const int SW_RESTORE = 9;
         public const int SW_SHOW = 5;
+        public const int SW_MINIMIZE = 6;
         public const uint PROCESS_QUERY_LIMITED_INFORMATION = 0x1000;
         public const byte VK_MENU = 0x12;
         public const uint KEYEVENTF_KEYUP = 0x2;
@@ -184,6 +185,17 @@ namespace RdpQuickSwitch
 
     internal static class Switcher
     {
+        // 一键回到主机桌面：最小化所有远程桌面窗口（已最小化的跳过）
+        public static void MinimizeAll(List<TargetWindow> windows)
+        {
+            for (int i = 0; i < windows.Count; i++)
+            {
+                TargetWindow w = windows[i];
+                if (Win32.IsWindow(w.Handle) && !Win32.IsIconic(w.Handle))
+                    Win32.ShowWindow(w.Handle, Win32.SW_MINIMIZE);
+            }
+        }
+
         public static void SwitchTo(IntPtr hwnd)
         {
             if (!Win32.IsWindow(hwnd)) return;
@@ -219,6 +231,7 @@ namespace RdpQuickSwitch
         private List<TargetWindow> _windows = new List<TargetWindow>();
         private bool _expanded;
         private int _hoverRow = -1;
+        private bool _hoverFooter;
         private Point _collapsedLocation;
         private Point _downPos;
         private bool _dragMoved;
@@ -310,7 +323,8 @@ namespace RdpQuickSwitch
         {
             if (_expanded && _windows.Count > 0)
             {
-                int h = HeadH + _windows.Count * RowH + Pad;
+                // 标题行 + 窗口列表 + 「回到主机桌面」按钮行 + 底部留白
+                int h = HeadH + _windows.Count * RowH + RowH + Pad;
                 Rectangle work = Screen.FromPoint(_collapsedLocation).WorkingArea;
                 int x = _collapsedLocation.X;
                 int y = _collapsedLocation.Y;
@@ -324,6 +338,7 @@ namespace RdpQuickSwitch
                 Location = _collapsedLocation;
                 ClientSize = new Size(PillW, PillH);
                 _hoverRow = -1;
+                _hoverFooter = false;
             }
             ApplyRegion();
         }
@@ -475,6 +490,20 @@ namespace RdpQuickSwitch
                         w.IsActive ? Color.White : Color.FromArgb(205, 210, 220),
                         TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis | TextFormatFlags.SingleLine);
                 }
+
+                // 底部「回到主机桌面」按钮行
+                int footY = HeadH + _windows.Count * RowH;
+                using (Pen linePen = new Pen(Color.FromArgb(55, 60, 70)))
+                    g.DrawLine(linePen, Pad, footY, ExpW - Pad, footY);
+                if (_hoverFooter)
+                {
+                    using (SolidBrush b = new SolidBrush(Color.FromArgb(42, 46, 54)))
+                        g.FillRectangle(b, 0, footY, ExpW, RowH);
+                }
+                TextRenderer.DrawText(g, "« 回到主机桌面（最小化全部远程）", Font,
+                    new Rectangle(Pad + (int)(2 * _s), footY, ExpW - Pad * 2 - (int)(4 * _s), RowH),
+                    Color.FromArgb(110, 185, 255),
+                    TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis | TextFormatFlags.SingleLine);
             }
         }
 
@@ -509,6 +538,7 @@ namespace RdpQuickSwitch
         {
             base.OnMouseLeave(e);
             _hoverRow = -1;
+            _hoverFooter = false;
             Invalidate();
             _collapseTimer.Start();
         }
@@ -534,10 +564,22 @@ namespace RdpQuickSwitch
             }
 
             int row = -1;
-            if (_expanded && _windows.Count > 0 && e.Y >= HeadH)
-                row = Math.Min((e.Y - HeadH) / RowH, _windows.Count - 1);
-            Cursor = row >= 0 ? Cursors.Hand : Cursors.Default;
-            if (row != _hoverRow) { _hoverRow = row; Invalidate(); }
+            bool footer = false;
+            if (_expanded && e.Y >= HeadH)
+            {
+                int rowsBottom = HeadH + _windows.Count * RowH;
+                if (e.Y < rowsBottom && _windows.Count > 0)
+                    row = Math.Min((e.Y - HeadH) / RowH, _windows.Count - 1);
+                else if (e.Y < rowsBottom + RowH)
+                    footer = true;
+            }
+            Cursor = (row >= 0 || footer) ? Cursors.Hand : Cursors.Default;
+            if (row != _hoverRow || footer != _hoverFooter)
+            {
+                _hoverRow = row;
+                _hoverFooter = footer;
+                Invalidate();
+            }
         }
 
         protected override void OnMouseDown(MouseEventArgs e)
@@ -559,9 +601,21 @@ namespace RdpQuickSwitch
 
             if (_expanded)
             {
-                // 直接按点击坐标定位行，不依赖悬停状态（快速点击/触屏时 MouseMove 可能不触发）
+                // 直接按点击坐标定位，不依赖悬停状态（快速点击/触屏时 MouseMove 可能不触发）
+                int rowsBottom = HeadH + _windows.Count * RowH;
+
+                if (e.Y >= rowsBottom && e.Y < rowsBottom + RowH)
+                {
+                    // 「回到主机桌面」：最小化全部远程桌面窗口
+                    Switcher.MinimizeAll(_windows);
+                    _expanded = false;
+                    UpdateSize();
+                    Invalidate();
+                    return;
+                }
+
                 int row = -1;
-                if (_windows.Count > 0 && e.Y >= HeadH)
+                if (_windows.Count > 0 && e.Y >= HeadH && e.Y < rowsBottom)
                     row = Math.Min((e.Y - HeadH) / RowH, _windows.Count - 1);
                 if (row >= 0)
                 {
