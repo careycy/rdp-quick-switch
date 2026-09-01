@@ -1,0 +1,8 @@
+# 远程桌面快切 - 额外识别的进程名（每行一个，可不带 .exe，# 开头为注释）
+# 默认已内置识别 mstsc.exe（Windows 自带"远程桌面连接"），如需识别其他软件，
+# 取消下行注释或按同样格式添加，保存后约 1 秒内自动生效：
+# ToDesk.exe
+# SunloginClient.exe
+# AnyDesk.exe
+# TeamViewer.exe
+# RustDesk.exe

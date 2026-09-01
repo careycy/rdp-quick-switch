@@ -1,0 +1,11 @@
+# 本地运行生成物
+floatpos.txt
+
+# 临时与测试文件
+*.png
+_*.cs
+_*.exe
+RdpSwitch_tmp.exe
+
+# 工具目录
+.zcode/
