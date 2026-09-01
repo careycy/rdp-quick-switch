@@ -235,6 +235,8 @@ namespace RdpQuickSwitch
         private Point _collapsedLocation;
         private Point _downPos;
         private bool _dragMoved;
+        private bool _dragArmed;      // 已按下（处于可拖动状态）
+        private bool _dragZoneHeader; // 按下点位于展开面板的标题栏
         private readonly System.Windows.Forms.Timer _pollTimer;
         private readonly System.Windows.Forms.Timer _collapseTimer;
         private readonly ToolTip _tip = new ToolTip();
@@ -539,6 +541,8 @@ namespace RdpQuickSwitch
             base.OnMouseLeave(e);
             _hoverRow = -1;
             _hoverFooter = false;
+            _dragArmed = false;
+            _dragZoneHeader = false;
             Invalidate();
             _collapseTimer.Start();
         }
@@ -547,17 +551,29 @@ namespace RdpQuickSwitch
         {
             base.OnMouseMove(e);
 
-            if (e.Button == MouseButtons.Left && !_expanded)
+            // 拖动：收起态按药丸任意位置拖；展开态按住标题栏拖
+            if (e.Button == MouseButtons.Left && _dragArmed && (!_expanded || _dragZoneHeader))
             {
                 int dx = Cursor.Position.X - _downPos.X;
                 int dy = Cursor.Position.Y - _downPos.Y;
                 if (!_dragMoved && Math.Abs(dx) + Math.Abs(dy) > 5) _dragMoved = true;
                 if (_dragMoved)
                 {
-                    Point p = _collapsedLocation;
-                    p.X += dx; p.Y += dy;
-                    _collapsedLocation = p;
-                    ClampCollapsedIntoScreen();
+                    if (_expanded)
+                    {
+                        // 拖展开面板：整体移动，收起时药丸会落在面板停留处
+                        Point lp = Location;
+                        lp.X += dx; lp.Y += dy;
+                        Location = lp;
+                        Cursor = Cursors.SizeAll;
+                    }
+                    else
+                    {
+                        Point p = _collapsedLocation;
+                        p.X += dx; p.Y += dy;
+                        _collapsedLocation = p;
+                        ClampCollapsedIntoScreen();
+                    }
                     _downPos = Cursor.Position;
                 }
                 return;
@@ -573,7 +589,8 @@ namespace RdpQuickSwitch
                 else if (e.Y < rowsBottom + RowH)
                     footer = true;
             }
-            Cursor = (row >= 0 || footer) ? Cursors.Hand : Cursors.Default;
+            bool header = _expanded && e.Y < HeadH;
+            Cursor = header ? Cursors.SizeAll : ((row >= 0 || footer) ? Cursors.Hand : Cursors.Default);
             if (row != _hoverRow || footer != _hoverFooter)
             {
                 _hoverRow = row;
@@ -589,6 +606,8 @@ namespace RdpQuickSwitch
             {
                 _downPos = Cursor.Position;
                 _dragMoved = false;
+                _dragArmed = true;
+                _dragZoneHeader = _expanded && e.Y < HeadH;
             }
         }
 
@@ -597,13 +616,37 @@ namespace RdpQuickSwitch
             base.OnMouseUp(e);
             if (e.Button != MouseButtons.Left) return;
 
-            if (_dragMoved) { SavePosition(); return; }
+            bool headerDrag = _dragArmed && _dragZoneHeader;
+            bool headerClick = _dragArmed && _dragZoneHeader && !_dragMoved;
+            _dragArmed = false;
+            _dragZoneHeader = false;
+
+            if (_dragMoved)
+            {
+                if (headerDrag)
+                {
+                    // 面板拖到哪，药丸收起后就落在哪
+                    _collapsedLocation = Location;
+                    ClampCollapsedIntoScreen();
+                }
+                SavePosition();
+                return;
+            }
 
             if (_expanded)
             {
-                // 直接按点击坐标定位，不依赖悬停状态（快速点击/触屏时 MouseMove 可能不触发）
                 int rowsBottom = HeadH + _windows.Count * RowH;
 
+                if (headerClick)
+                {
+                    // 单击展开面板标题栏（未拖动）：收起浮窗
+                    _expanded = false;
+                    UpdateSize();
+                    Invalidate();
+                    return;
+                }
+
+                // 直接按点击坐标定位，不依赖悬停状态（快速点击/触屏时 MouseMove 可能不触发）
                 if (e.Y >= rowsBottom && e.Y < rowsBottom + RowH)
                 {
                     // 「回到主机桌面」：最小化全部远程桌面窗口
