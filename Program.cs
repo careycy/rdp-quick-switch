@@ -239,6 +239,7 @@ namespace RdpQuickSwitch
         private bool _dragZoneHeader; // 按下点位于展开面板的标题栏
         private readonly System.Windows.Forms.Timer _pollTimer;
         private readonly System.Windows.Forms.Timer _collapseTimer;
+        private readonly System.Windows.Forms.Timer _expandTimer; // 悬停延时展开，避免划过/按下拖动时面板立刻弹出
         private readonly ToolTip _tip = new ToolTip();
 
         private int PillW { get { return (int)(78 * _s); } }
@@ -275,6 +276,22 @@ namespace RdpQuickSwitch
             _collapseTimer.Interval = 350;
             _collapseTimer.Tick += CollapseTimerTick;
 
+            // 悬停约 300ms 才展开面板：快速划过或按下拖动时保持小药丸
+            _expandTimer = new System.Windows.Forms.Timer();
+            _expandTimer.Interval = 280;
+            _expandTimer.Tick += delegate
+            {
+                _expandTimer.Stop();
+                Rectangle b = new Rectangle(Location, Size);
+                b.Inflate(1, 1);
+                if (b.Contains(Cursor.Position) && _windows.Count > 0 && !_expanded)
+                {
+                    _expanded = true;
+                    UpdateSize();
+                    Invalidate();
+                }
+            };
+
             // 初始必须无条件按收起态定好尺寸：
             // 若当前没有任何远程桌面窗口，RefreshWindows 检测不到变化会跳过 UpdateSize，
             // 表单就会保持 WinForms 默认的 300x300，浮窗变成一个大灰块。
@@ -289,6 +306,7 @@ namespace RdpQuickSwitch
             {
                 _pollTimer.Dispose();
                 _collapseTimer.Dispose();
+                _expandTimer.Dispose();
                 _tip.Dispose();
             }
             base.Dispose(disposing);
@@ -528,17 +546,15 @@ namespace RdpQuickSwitch
         {
             base.OnMouseEnter(e);
             _collapseTimer.Stop();
+            // 延时展开：停稳一会儿才弹面板，抓取拖动不会触发
             if (_windows.Count > 0 && !_expanded)
-            {
-                _expanded = true;
-                UpdateSize();
-                Invalidate();
-            }
+                _expandTimer.Start();
         }
 
         protected override void OnMouseLeave(EventArgs e)
         {
             base.OnMouseLeave(e);
+            _expandTimer.Stop();
             _hoverRow = -1;
             _hoverFooter = false;
             _dragArmed = false;
@@ -604,6 +620,7 @@ namespace RdpQuickSwitch
             base.OnMouseDown(e);
             if (e.Button == MouseButtons.Left)
             {
+                _expandTimer.Stop(); // 按下即视为拖动意图，不再弹出面板
                 _downPos = Cursor.Position;
                 _dragMoved = false;
                 _dragArmed = true;
